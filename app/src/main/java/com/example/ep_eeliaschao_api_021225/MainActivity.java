@@ -20,7 +20,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements ProductoAdapter.OnItemClickListener {
 
     private RecyclerView recyclerViewItems;
     private ArrayList<Producto> listaProductos = new ArrayList<>();
@@ -35,7 +35,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerViewItems = findViewById(R.id.recyclerViewItems);
         recyclerViewItems.setLayoutManager(new LinearLayoutManager(this));
 
-        adapter = new ProductoAdapter(listaProductos);
+        adapter = new ProductoAdapter(listaProductos, this);
         recyclerViewItems.setAdapter(adapter);
 
         FloatingActionButton fab = findViewById(R.id.fabAdd);
@@ -168,6 +168,141 @@ public class MainActivity extends AppCompatActivity {
             con.disconnect();
         } catch (Exception e) {
             runOnUiThread(() -> Toast.makeText(this, "Error al agregar el producto: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onEditClick(Producto producto) {
+        mostrarDialogoEditarProducto(producto);
+    }
+
+    private void mostrarDialogoEditarProducto(Producto producto) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Editar Producto");
+
+        View viewInflated = LayoutInflater.from(this).inflate(R.layout.dialog_add_product, null);
+        builder.setView(viewInflated);
+
+        final EditText editTextTitle = viewInflated.findViewById(R.id.editTextTitle);
+        final EditText editTextPrice = viewInflated.findViewById(R.id.editTextPrice);
+        final EditText editTextDescription = viewInflated.findViewById(R.id.editTextDescription);
+        final EditText editTextCategory = viewInflated.findViewById(R.id.editTextCategory);
+        final EditText editTextImageUrl = viewInflated.findViewById(R.id.editTextImageUrl);
+
+        editTextTitle.setText(producto.getTitle());
+        editTextPrice.setText(String.valueOf(producto.getPrice()));
+        editTextDescription.setText(producto.getDescription());
+        editTextCategory.setText(producto.getCategory());
+        editTextImageUrl.setText(producto.getImage());
+
+        builder.setPositiveButton("Guardar", (dialog, which) -> {
+            String title = editTextTitle.getText().toString();
+            String priceStr = editTextPrice.getText().toString();
+            String description = editTextDescription.getText().toString();
+            String category = editTextCategory.getText().toString();
+            String imageUrl = editTextImageUrl.getText().toString();
+
+            if (title.isEmpty() || priceStr.isEmpty()) {
+                Toast.makeText(this, "El título y el precio son obligatorios", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            try {
+                double price = Double.parseDouble(priceStr);
+                Producto productoActualizado = new Producto();
+                productoActualizado.setId(producto.getId());
+                productoActualizado.setTitle(title);
+                productoActualizado.setPrice(price);
+                productoActualizado.setDescription(description);
+                productoActualizado.setCategory(category);
+                productoActualizado.setImage(imageUrl);
+
+                new Thread(() -> actualizarProducto(productoActualizado)).start();
+            } catch (NumberFormatException e) {
+                Toast.makeText(this, "Precio inválido", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton("Cancelar", (dialog, which) -> dialog.cancel());
+
+        builder.show();
+    }
+
+    private void actualizarProducto(Producto producto) {
+        try {
+            URL url = new URL(apiURL + "/" + producto.getId());
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con.setRequestMethod("PUT");
+            con.setRequestProperty("Content-Type", "application/json; utf-8");
+            con.setDoOutput(true);
+
+            JSONObject jsonParam = new JSONObject();
+            jsonParam.put("title", producto.getTitle());
+            jsonParam.put("price", producto.getPrice());
+            jsonParam.put("description", producto.getDescription());
+            jsonParam.put("image", producto.getImage());
+            jsonParam.put("category", producto.getCategory());
+
+            String jsonInputString = jsonParam.toString();
+
+            try (OutputStream os = con.getOutputStream()) {
+                byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
+                os.write(input, 0, input.length);
+            }
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8));
+            reader.close(); // No necesitamos leer la respuesta para PUT
+
+            runOnUiThread(() -> {
+                int position = -1;
+                for (int i = 0; i < listaProductos.size(); i++) {
+                    if (listaProductos.get(i).getId() == producto.getId()) {
+                        position = i;
+                        break;
+                    }
+                }
+                if (position != -1) {
+                    adapter.updateProducto(position, producto);
+                }
+                Toast.makeText(this, "Producto actualizado", Toast.LENGTH_SHORT).show();
+            });
+
+            con.disconnect();
+        } catch (Exception e) {
+            runOnUiThread(() -> Toast.makeText(this, "Error al actualizar el producto: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onDeleteClick(int position) {
+        Producto producto = listaProductos.get(position);
+        new AlertDialog.Builder(this)
+                .setTitle("Eliminar Producto")
+                .setMessage("¿Estás seguro de que quieres eliminar este producto?")
+                .setPositiveButton("Sí", (dialog, which) -> new Thread(() -> eliminarProducto(producto.getId(), position)).start())
+                .setNegativeButton("No", null)
+                .show();
+    }
+
+    private void eliminarProducto(int productoId, int position) {
+        try {
+            URL url = new URL(apiURL + "/" + productoId);
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con.setRequestMethod("DELETE");
+
+            int responseCode = con.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                runOnUiThread(() -> {
+                    adapter.removeProducto(position);
+                    Toast.makeText(this, "Producto eliminado", Toast.LENGTH_SHORT).show();
+                });
+            } else {
+                runOnUiThread(() -> Toast.makeText(this, "Error al eliminar el producto: " + responseCode, Toast.LENGTH_LONG).show());
+            }
+            con.disconnect();
+        } catch (Exception e) {
+            runOnUiThread(() -> Toast.makeText(this, "Error al eliminar el producto: " + e.getMessage(), Toast.LENGTH_LONG).show());
             e.printStackTrace();
         }
     }
